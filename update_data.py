@@ -1,73 +1,73 @@
 import requests
 import json
 import os
-from datetime import datetime
 
 # Dosya İsimleri
-ANA_DOSYA = "depremler.json"
-GUNCEL_DOSYA = "son_depremler.json"
+ANA_DOSYA = "depremler.json"       # Senin yüklediğin büyük dosya
+GUNCEL_DOSYA = "son_depremler.json" # Uygulama için küçük dosya
 
 def verileri_guncelle():
-    print("Islem basliyor...")
+    print("🚀 Güncelleme robotu çalıştı...")
     
-    # 1. MEVCUT ARŞİVİ OKU
+    # 1. MEVCUT BÜYÜK ARŞİVİ OKU
+    mevcut_veri = []
     if os.path.exists(ANA_DOSYA):
-        with open(ANA_DOSYA, "r", encoding="utf-8") as f:
-            try:
+        try:
+            with open(ANA_DOSYA, "r", encoding="utf-8") as f:
                 mevcut_veri = json.load(f)
-            except:
-                mevcut_veri = []
+            print(f"📦 Mevcut arşiv yüklendi: {len(mevcut_veri)} adet kayıt.")
+        except Exception as e:
+            print(f"⚠️ Dosya okuma hatası: {e}")
+            mevcut_veri = []
     else:
-        mevcut_veri = []
-    
-    print(f"Mevcut veri sayisi: {len(mevcut_veri)}")
+        print("⚠️ Ana dosya bulunamadı! Sıfırdan başlanıyor.")
 
-    # 2. KANDİLLİ'DEN YENİ VERİLERİ ÇEK
-    url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
+    # 2. KANDİLLİ'DEN CANLI VERİ ÇEK (Son 500)
+    url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live?limit=500"
+    yeni_veriler = []
     try:
-        response = requests.get(url)
-        if response.status_code != 200:
-            print("API hatasi!")
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            yeni_veriler = response.json()["result"]
+            print(f"📡 Kandilli'den {len(yeni_veriler)} adet canlı veri çekildi.")
+        else:
+            print("❌ API Hatası!")
             return
-        yeni_veriler = response.json()["result"]
     except Exception as e:
-        print(f"Hata: {e}")
+        print(f"❌ Bağlantı hatası: {e}")
         return
 
     # 3. KONTROL VE BİRLEŞTİRME
-    # Mevcut verilerin tarihlerini bir kümede (set) tutalım ki hızlı kontrol edelim
-    # Not: API tarih formatı "2023.12.18 14:30:00" şeklindedir.
+    # Hız için tarihleri bir kümeye (set) alıyoruz
     mevcut_tarihler = {d["date"] for d in mevcut_veri}
     
     eklenen_sayisi = 0
     
-    # Yeni gelen listeyi tersten dönüyoruz (Eskiden Yeniye)
-    # Böylece listemizin en tepesine (index 0) en son depremi ekleriz.
+    # Yeni gelenleri tersten (eskiden yeniye) tarıyoruz ki sırayla ekleyelim
     for deprem in reversed(yeni_veriler):
-        # Sadece 3.0 ve üzerini alalım (Senin tercihin, istersen bu satırı silip hepsini alırsın)
-        if deprem["mag"] >= 3.0:
-            # Eğer bu tarih bizde yoksa ekle
-            if deprem["date"] not in mevcut_tarihler:
-                mevcut_veri.insert(0, deprem) # En başa ekle
-                mevcut_tarihler.add(deprem["date"])
-                eklenen_sayisi += 1
+        # Büyüklük filtresi (İstersen 3.0 yapabilirsin, şimdilik hepsini alalım)
+        # Veritabanımızda bu tarih yoksa ekle
+        if deprem["date"] not in mevcut_tarihler:
+            mevcut_veri.insert(0, deprem) # En tepeye ekle
+            mevcut_tarihler.add(deprem["date"])
+            eklenen_sayisi += 1
 
-    # 4. KAYDETME
-    if eklenen_sayisi > 0:
-        print(f"Toplanda {eklenen_sayisi} yeni deprem eklendi.")
+    # 4. KAYDETME (Sadece yeni veri varsa veya küçük dosya yoksa)
+    if eklenen_sayisi > 0 or not os.path.exists(GUNCEL_DOSYA):
+        print(f"✅ {eklenen_sayisi} yeni deprem arşive eklendi.")
         
-        # A) Ana Arşivi Kaydet (Yedek)
+        # A) Büyük Arşivi Güncelle
         with open(ANA_DOSYA, "w", encoding="utf-8") as f:
-            json.dump(mevcut_veri, f, ensure_ascii=False, indent=None) # indent=None dosya boyutunu küçültür
+            # indent=None dosya boyutunu %30 küçültür (Minified JSON)
+            json.dump(mevcut_veri, f, ensure_ascii=False, indent=None)
             
-        # B) Güncel Dosyayı Kaydet (Mobil Uygulama İçin - İlk 100 Veri)
-        # Uygulama açılışta sadece bunu çekecek, çok hızlı olacak.
+        # B) Küçük Dosyayı Oluştur (Mobil Uygulama Açılışı İçin - İlk 100)
         with open(GUNCEL_DOSYA, "w", encoding="utf-8") as f:
             json.dump(mevcut_veri[:100], f, ensure_ascii=False, indent=None)
             
-        print("Dosyalar güncellendi.")
+        print("💾 Dosyalar başarıyla kaydedildi.")
     else:
-        print("Yeni deprem bulunamadi, dosyalar degismedi.")
+        print("💤 Yeni deprem yok, dosyalar güncel.")
 
 if __name__ == "__main__":
     verileri_guncelle()
