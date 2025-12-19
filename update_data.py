@@ -3,8 +3,8 @@ import json
 import os
 
 # Dosya İsimleri
-ANA_DOSYA = "depremler.json"       # Senin yüklediğin büyük dosya
-GUNCEL_DOSYA = "son_depremler.json" # Uygulama için küçük dosya
+ANA_DOSYA = "depremler.json"
+GUNCEL_DOSYA = "son_depremler.json"
 
 def verileri_guncelle():
     print("🚀 Güncelleme robotu çalıştı...")
@@ -22,50 +22,66 @@ def verileri_guncelle():
     else:
         print("⚠️ Ana dosya bulunamadı! Sıfırdan başlanıyor.")
 
-    # 2. KANDİLLİ'DEN CANLI VERİ ÇEK (Son 500)
+    # 2. KANDİLLİ'DEN CANLI VERİ ÇEK
     url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live?limit=500"
     yeni_veriler = []
     try:
         response = requests.get(url, timeout=30)
         if response.status_code == 200:
-            yeni_veriler = response.json()["result"]
-            print(f"📡 Kandilli'den {len(yeni_veriler)} adet canlı veri çekildi.")
+            data = response.json()
+            # API bazen result döndürmez, kontrol edelim
+            if "result" in data:
+                yeni_veriler = data["result"]
+                print(f"📡 Kandilli'den {len(yeni_veriler)} adet canlı veri çekildi.")
+            else:
+                print("⚠️ API yanıtında 'result' bulunamadı.")
         else:
-            print("❌ API Hatası!")
+            print(f"❌ API Hatası: {response.status_code}")
             return
     except Exception as e:
         print(f"❌ Bağlantı hatası: {e}")
         return
 
     # 3. KONTROL VE BİRLEŞTİRME
-    # Hız için tarihleri bir kümeye (set) alıyoruz
-    mevcut_tarihler = {d["date"] for d in mevcut_veri}
+    # Hata veren kısım burasıydı. Artık .get() kullanarak güvenli hale getiriyoruz.
+    # Eğer "date" yoksa o veriyi yoksayacağız.
+    mevcut_tarihler = set()
+    for d in mevcut_veri:
+        tarih = d.get("date") # Varsa al, yoksa None ver
+        if tarih:
+            mevcut_tarihler.add(tarih)
     
     eklenen_sayisi = 0
     
-    # Yeni gelenleri tersten (eskiden yeniye) tarıyoruz ki sırayla ekleyelim
+    # Yeni gelenleri işle
     for deprem in reversed(yeni_veriler):
-        # Büyüklük filtresi (İstersen 3.0 yapabilirsin, şimdilik hepsini alalım)
-        # Veritabanımızda bu tarih yoksa ekle
-        if deprem["date"] not in mevcut_tarihler:
-            mevcut_veri.insert(0, deprem) # En tepeye ekle
-            mevcut_tarihler.add(deprem["date"])
-            eklenen_sayisi += 1
+        yeni_tarih = deprem.get("date")
+        
+        # Eğer tarih bilgisi yoksa veya zaten bizde varsa atla
+        if not yeni_tarih or yeni_tarih in mevcut_tarihler:
+            continue
+            
+        # Eğer veri geçerliyse ekle
+        mevcut_veri.insert(0, deprem)
+        mevcut_tarihler.add(yeni_tarih)
+        eklenen_sayisi += 1
 
-    # 4. KAYDETME (Sadece yeni veri varsa veya küçük dosya yoksa)
+    # 4. KAYDETME
     if eklenen_sayisi > 0 or not os.path.exists(GUNCEL_DOSYA):
         print(f"✅ {eklenen_sayisi} yeni deprem arşive eklendi.")
         
-        # A) Büyük Arşivi Güncelle
-        with open(ANA_DOSYA, "w", encoding="utf-8") as f:
-            # indent=None dosya boyutunu %30 küçültür (Minified JSON)
-            json.dump(mevcut_veri, f, ensure_ascii=False, indent=None)
-            
-        # B) Küçük Dosyayı Oluştur (Mobil Uygulama Açılışı İçin - İlk 100)
-        with open(GUNCEL_DOSYA, "w", encoding="utf-8") as f:
-            json.dump(mevcut_veri[:100], f, ensure_ascii=False, indent=None)
-            
-        print("💾 Dosyalar başarıyla kaydedildi.")
+        try:
+            # A) Büyük Arşivi Güncelle
+            with open(ANA_DOSYA, "w", encoding="utf-8") as f:
+                json.dump(mevcut_veri, f, ensure_ascii=False, indent=None)
+                
+            # B) Küçük Dosyayı Oluştur (Mobil Uygulama İçin - İlk 100)
+            with open(GUNCEL_DOSYA, "w", encoding="utf-8") as f:
+                json.dump(mevcut_veri[:100], f, ensure_ascii=False, indent=None)
+                
+            print("💾 Dosyalar başarıyla kaydedildi.")
+        except Exception as e:
+            print(f"❌ Kaydetme hatası: {e}")
     else:
         print("💤 Yeni deprem yok, dosyalar güncel.")
 
