@@ -77,7 +77,7 @@ def verileri_guncelle():
                 
             # B) Küçük Dosyayı Oluştur (Mobil Uygulama İçin - İlk 100)
             with open(GUNCEL_DOSYA, "w", encoding="utf-8") as f:
-                json.dump(mevcut_veri[:100], f, ensure_ascii=False, indent=None)
+                json.dump(mevcut_veri[:500], f, ensure_ascii=False, indent=None)
                 
             print("💾 Dosyalar başarıyla kaydedildi.")
         except Exception as e:
