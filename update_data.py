@@ -1,95 +1,104 @@
 import requests
 import json
 import os
+import time
 
-ANA_DOSYA = "depremler.json"
+# Dosya yolları (Senin bilgisayarına göre)
+ANA_DOSYA = "C:/Users/emirhan/Code/earthquake/depremler.json"
+GUNCEL_DOSYA = "C:/Users/emirhan/Code/earthquake/son_depremler.json"
 
-def bosluk_doldur():
-    print("🚑 Boşluk Doldurma Operasyonu Başladı...")
+def bosluk_doldur_loop():
+    print("🚑 GELİŞMİŞ Boşluk Doldurma Operasyonu (Sayfalamalı) Başladı...")
 
     # 1. MEVCUT ARŞİVİ YÜKLE
     mevcut_veri = []
     if os.path.exists(ANA_DOSYA):
-        with open(ANA_DOSYA, "r", encoding="utf-8") as f:
-            mevcut_veri = json.load(f)
-        print(f"📦 Mevcut arşivde {len(mevcut_veri)} kayıt var.")
+        try:
+            with open(ANA_DOSYA, "r", encoding="utf-8") as f:
+                mevcut_veri = json.load(f)
+            print(f"📦 Mevcut arşivde {len(mevcut_veri)} kayıt var.")
+        except Exception as e:
+            print(f"🚨 Dosya okuma hatası: {e}")
+            return
     else:
-        print("🚨 Arşiv dosyası bulunamadı!")
+        print("🚨 Dosya bulunamadı!")
         return
 
-    # 2. API'DEN GEÇMİŞE YÖNELİK VERİ ÇEK (ARCHIVE ENDPOINT)
-    # limit=2000 diyerek son bir haftayı garantiye alıyoruz
-    url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/archive?limit=2000"
+    # ID Seti Oluştur (Hız için)
+    mevcut_id_seti = set()
+    for d in mevcut_veri:
+        uid = f"{d.get('date')}_{d.get('title')}"
+        mevcut_id_seti.add(uid)
+
+    # 2. DÖNGÜ İLE VERİ ÇEK (Toplam 20 sayfa x 100 = 2000 veri)
+    toplam_eklenen = 0
     
-    print(f"🌍 API'ye bağlanılıyor: {url}")
-    
-    try:
-        response = requests.get(url, timeout=60) # Süreyi uzattık
-        data = response.json()
+    # 0'dan 2000'e kadar 100'er 100'er atlayarak gideceğiz
+    for skip_miktari in range(0, 2000, 100):
+        print(f"\n🔄 İstek yapılıyor: Skip {skip_miktari} - {skip_miktari+100} arası...")
         
-        if response.status_code == 200 and "result" in data:
-            ham_liste = data["result"]
-            print(f"📊 API'den TOPLAM {len(ham_liste)} adet ham veri geldi.") 
-            # (Burada 100 yazıyorsa API limitini zorlamıyor demektir, 1000+ görmeliyiz)
-
-            uygun_adaylar = []
+        # skip parametresini kullanıyoruz
+        url = f"https://api.orhanaydogdu.com.tr/deprem/kandilli/archive?limit=100&skip={skip_miktari}"
+        
+        try:
+            response = requests.get(url, timeout=30)
+            data = response.json()
             
-            # 3. VERİLERİ DÜZENLE VE FİLTRELE
-            for item in ham_liste:
-                # Tarih düzeltmesi (date_time -> date)
-                if "date_time" in item:
-                    item["date"] = item["date_time"]
+            if response.status_code == 200 and "result" in data:
+                ham_veriler = data["result"]
+                gelen_adet = len(ham_veriler)
+                print(f"   📡 Bu sayfadan {gelen_adet} veri geldi.")
                 
-                # Büyüklük Filtresi (3.0+)
-                try:
-                    mag = float(item.get("mag", 0))
-                    if mag >= 3.0:
-                        uygun_adaylar.append(item)
-                except:
-                    continue
+                if gelen_adet == 0:
+                    print("   🛑 Veri bitti, döngü sonlandırılıyor.")
+                    break
 
-            print(f"mag >= 3.0 filtresinden geçen aday sayısı: {len(uygun_adaylar)}")
-
-            # 4. KIYASLA VE EKLE
-            # Arşivdeki ID'leri bir sete atalım (Hız için)
-            mevcut_id_seti = set()
-            for d in mevcut_veri:
-                uid = f"{d.get('date')}_{d.get('title')}"
-                mevcut_id_seti.add(uid)
-
-            eklenenler = 0
-            # Adayları tersten (eskiden yeniye) tarayıp ekle
-            for aday in reversed(uygun_adaylar):
-                uid = f"{aday.get('date')}_{aday.get('title')}"
-                
-                if uid not in mevcut_id_seti:
-                    # BAŞA EKLE
-                    mevcut_veri.insert(0, aday)
-                    mevcut_id_seti.add(uid)
-                    eklenenler += 1
-                    # Merak ediyorsan ekleneni yazdır:
-                    # print(f"   ➕ Eklendi: {aday['date']} - {aday['title']}")
-
-            if eklenenler > 0:
-                print(f"✅ TOPLAM {eklenenler} ADET KAYIP DEPREM ARŞİVE EKLENDİ!")
-                
-                # KAYDET
-                with open(ANA_DOSYA, "w", encoding="utf-8") as f:
-                    json.dump(mevcut_veri, f, ensure_ascii=False, indent=None)
-                
-                # Küçük dosyayı da güncelle
-                with open("son_depremler.json", "w", encoding="utf-8") as f:
-                    json.dump(mevcut_veri[:500], f, ensure_ascii=False, indent=None)
+                # Bu sayfadaki verileri işle
+                sayfa_eklenen = 0
+                for item in ham_veriler:
+                    # Tarih düzeltmesi
+                    if "date_time" in item:
+                        item["date"] = item["date_time"]
                     
-                print("💾 Dosyalar kaydedildi. Şimdi GitHub'a push edebilirsin.")
+                    # Büyüklük Filtresi (3.0+)
+                    try:
+                        mag = float(item.get("mag", 0))
+                        if mag >= 3.0:
+                            # ID kontrolü
+                            uid = f"{item.get('date')}_{item.get('title')}"
+                            if uid not in mevcut_id_seti:
+                                mevcut_veri.insert(0, item) # Başa ekle
+                                mevcut_id_seti.add(uid)
+                                sayfa_eklenen += 1
+                                toplam_eklenen += 1
+                    except:
+                        continue
+                
+                print(f"   ✅ Bu sayfadan {sayfa_eklenen} yeni deprem eklendi.")
+                
+                # API'yi yormamak için azıcık bekle
+                time.sleep(1)
+
             else:
-                print("💤 Eksik veri bulunamadı. Arşiv ile API birebir örtüşüyor.")
+                print("   ❌ Sayfa çekilemedi.")
+                
+        except Exception as e:
+            print(f"   ❌ Bağlantı hatası: {e}")
+            break
 
-        else:
-            print("❌ API yanıtı hatalı.")
-
-    except Exception as e:
-        print(f"❌ Hata oluştu: {e}")
+    # 3. SONUÇLARI KAYDET
+    if toplam_eklenen > 0:
+        print(f"\n🎉 OPERASYON TAMAM! Toplam {toplam_eklenen} eksik deprem bulundu ve eklendi.")
+        
+        with open(ANA_DOSYA, "w", encoding="utf-8") as f:
+            json.dump(mevcut_veri, f, ensure_ascii=False, indent=None)
+        
+        with open(GUNCEL_DOSYA, "w", encoding="utf-8") as f:
+            json.dump(mevcut_veri[:500], f, ensure_ascii=False, indent=None)
+            
+        print("💾 Dosyalar başarıyla kaydedildi. GitHub'a Push etmeyi unutma!")
+    else:
+        print("\n💤 Hiç yeni veri bulunamadı. Arşiv zaten tam görünüyor.")
 
 if __name__ == "__main__":
-    bosluk_doldur()
+    bosluk_doldur_loop()
