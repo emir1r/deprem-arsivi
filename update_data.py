@@ -1,7 +1,6 @@
 import requests
 import json
 import os
-from datetime import datetime
 
 ANA_DOSYA = "depremler.json"
 GUNCEL_DOSYA = "son_depremler.json"
@@ -16,16 +15,11 @@ def verileri_guncelle():
             with open(ANA_DOSYA, "r", encoding="utf-8") as f:
                 mevcut_veri = json.load(f)
             print(f"📦 Arşivde {len(mevcut_veri)} kayıt var.")
-            
-            # Arşivdeki en güncel depremi bulalım (Kontrol için)
-            if len(mevcut_veri) > 0:
-                print(f"🗓️  Arşivdeki EN SON deprem tarihi: {mevcut_veri[0].get('date')}")
         except Exception as e:
             print(f"🚨 Dosya okuma hatası: {e}")
             return
 
     # --- 2. API'DEN VERİ ÇEK ---
-    # Not: limit=500 çalışmıyorsa API kaynaklıdır, ama biz yine de isteyelim.
     url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live?limit=500"
     
     yeni_gelenler = []
@@ -36,11 +30,27 @@ def verileri_guncelle():
         if response.status_code == 200:
             data = response.json()
             if "result" in data:
-                yeni_gelenler = data["result"]
-                print(f"📡 API'den {len(yeni_gelenler)} adet veri geldi.")
+                ham_veriler = data["result"]
                 
-                if len(yeni_gelenler) > 0:
-                    print(f"🔥 API'den gelen EN YENİ tarih: {yeni_gelenler[0].get('date')}")
+                # --- KRİTİK DÜZELTME BURADA ---
+                # API 'date_time' veriyor ama bizim sistem 'date' kullanıyor.
+                # Gelen veriyi bizim formatımıza çeviriyoruz.
+                for item in ham_veriler:
+                    # Eğer 'date_time' varsa onu 'date' olarak kopyala
+                    if "date_time" in item:
+                        item["date"] = item["date_time"]
+                    
+                    # Büyüklük Filtresi (3.0 ve üzeri)
+                    # Bazen mag str gelebilir, float'a çevirip kontrol edelim
+                    try:
+                        buyukluk = float(item.get("mag", 0))
+                        if buyukluk >= 3.0:
+                            yeni_gelenler.append(item)
+                    except:
+                        # Eğer büyüklük hatalıysa yine de ekle (veri kaybı olmasın)
+                        yeni_gelenler.append(item)
+
+                print(f"📡 API'den {len(yeni_gelenler)} adet uygun veri (3.0+) alındı.")
             else:
                 print("⚠️ API yanıtında 'result' bulunamadı.")
         else:
@@ -50,51 +60,41 @@ def verileri_guncelle():
         print(f"❌ Bağlantı hatası: {e}")
         return
 
-    # --- 3. KARŞILAŞTIR VE EKLE (DEBUG MODU) ---
-    # Benzersizlik kontrolü için ID oluşturalım (Tarih + Yer)
-    # Çünkü bazen tarih aynı kalıp veri değişebilir.
+    # --- 3. KARŞILAŞTIR VE EKLE ---
+    # Benzersizlik kontrolü için ID seti oluştur
     mevcut_id_seti = set()
     for d in mevcut_veri:
+        # Eski verilerde 'date' var, yenilerde de artık 'date' var (biz ekledik)
         uid = f"{d.get('date')}_{d.get('title')}"
         mevcut_id_seti.add(uid)
 
-    eklenenler = []
+    eklenen_sayisi = 0
     
-    # API'den gelenler (Yeniden eskiye doğru gelir, biz ters çevirip eskiden yeniye ekleyelim ki sıra bozulmasın)
+    # API verilerini tersten (eskiden yeniye) dönerek ekle
     for deprem in reversed(yeni_gelenler):
         uid = f"{deprem.get('date')}_{deprem.get('title')}"
         
-        # Eğer bu ID arşivde yoksa EKLE
         if uid not in mevcut_id_seti:
-            # Önce arşive (listenin başına) ekle
             mevcut_veri.insert(0, deprem)
-            # Sonra sete ekle (tekrarı önlemek için)
             mevcut_id_seti.add(uid)
-            eklenenler.append(deprem)
+            eklenen_sayisi += 1
 
-    if len(eklenenler) > 0:
-        print(f"✅ {len(eklenenler)} YENİ DEPREM BULUNDU ve eklendi!")
-        print(f"🔎 Örnek Eklenen: {eklenenler[-1]['title']} - {eklenenler[-1]['date']}")
+    if eklenen_sayisi > 0:
+        print(f"✅ {eklenen_sayisi} YENİ DEPREM ARŞİVE EKLENDİ!")
         
         # --- 4. DOSYALARI KAYDET ---
         try:
-            # Ana arşivi güncelle
             with open(ANA_DOSYA, "w", encoding="utf-8") as f:
                 json.dump(mevcut_veri, f, ensure_ascii=False, indent=None)
             
-            # Vitrin dosyasını güncelle (Sadece son 500)
             with open(GUNCEL_DOSYA, "w", encoding="utf-8") as f:
                 json.dump(mevcut_veri[:500], f, ensure_ascii=False, indent=None)
                 
             print("💾 Dosyalar başarıyla güncellendi.")
         except Exception as e:
             print(f"❌ Yazma hatası: {e}")
-            
     else:
-        print("💤 Yeni deprem yok. Arşiv zaten güncel.")
-        # Arşivdeki ilk kayıtla API'nin ilk kaydı aynı mı kontrolü
-        if len(yeni_gelenler) > 0 and len(mevcut_veri) > 0:
-            print(f"   (Arşiv Başı: {mevcut_veri[0].get('date')} == API Başı: {yeni_gelenler[0].get('date')})")
+        print("💤 Yeni deprem yok. Arşiv güncel.")
 
 if __name__ == "__main__":
     verileri_guncelle()
