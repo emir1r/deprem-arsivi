@@ -20,7 +20,7 @@ def verileri_guncelle():
             return
 
     # --- 2. API'DEN VERİ ÇEK ---
-    url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/live?limit=5000"
+    url = "https://api.orhanaydogdu.com.tr/deprem/kandilli/archive?limit=2000"
     
     yeni_gelenler = []
     try:
